@@ -102,6 +102,18 @@ class OculusBridge(Node):
         except (TypeError, ValueError):
             return 0
 
+    def analog_value(self, buttons_dict, analog_key, digital_key=None):
+        value = buttons_dict.get(analog_key, 0.0)
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else 0.0
+        try:
+            analog = float(value)
+        except (TypeError, ValueError):
+            analog = 0.0
+        if digital_key is not None and bool(buttons_dict.get(digital_key, False)):
+            analog = max(analog, 1.0)
+        return min(max(analog, 0.0), 1.0)
+
     def axis_value(self, buttons_dict, key, index, default=0.0):
         value = buttons_dict.get(key, ())
         if not isinstance(value, (list, tuple)) or len(value) <= index:
@@ -143,8 +155,8 @@ class OculusBridge(Node):
         msg.axes = [
             self.axis_value(buttons_dict, joystick_key, 0),
             self.axis_value(buttons_dict, joystick_key, 1),
-            float(msg.buttons[1]),
-            float(msg.buttons[2]),
+            self.analog_value(buttons_dict, grip_axis_key, grip_key),
+            self.analog_value(buttons_dict, trigger_axis_key, trigger_key),
         ]
         publisher.publish(msg)
 

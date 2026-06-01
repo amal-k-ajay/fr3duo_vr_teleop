@@ -33,9 +33,13 @@ class FrankaQuestTeleop(Node):
         self.declare_parameter('button_topic', '')
         self.declare_parameter('twist_topic', '')
         self.declare_parameter('gripper_action', '')
-        self.declare_parameter('gripper_open_width', 0.08)
+        self.declare_parameter('gripper_open_width', 0.020)
         self.declare_parameter('gripper_closed_width', 0.0)
+        self.declare_parameter('gripper_max_command_width', 0.020)
         self.declare_parameter('gripper_max_effort', 20.0)
+        self.declare_parameter('gripper_trigger_axis_index', 3)
+        self.declare_parameter('gripper_command_period', 0.1)
+        self.declare_parameter('gripper_command_min_delta', 0.001)
         self.declare_parameter('servo_start_service', '')
         axis_parameter_descriptor = ParameterDescriptor(dynamic_typing=True)
         self.declare_parameter('controller_forward_axis', 'z', axis_parameter_descriptor)
@@ -56,7 +60,11 @@ class FrankaQuestTeleop(Node):
         self.collision_dist = self.get_parameter('collision_distance').value
         self.gripper_open_width = self.get_parameter('gripper_open_width').value
         self.gripper_closed_width = self.get_parameter('gripper_closed_width').value
+        self.gripper_max_command_width = self.get_parameter('gripper_max_command_width').value
         self.gripper_max_effort = self.get_parameter('gripper_max_effort').value
+        self.gripper_trigger_axis_index = self.get_parameter('gripper_trigger_axis_index').value
+        self.gripper_command_period = self.get_parameter('gripper_command_period').value
+        self.gripper_command_min_delta = self.get_parameter('gripper_command_min_delta').value
         self.controller_forward_axis = self.get_parameter('controller_forward_axis').value
         self.controller_left_axis = self.get_parameter('controller_left_axis').value
         self.controller_up_axis = self.get_parameter('controller_up_axis').value
@@ -102,6 +110,8 @@ class FrankaQuestTeleop(Node):
         self.last_logged_grip_pressed = False
         self.trigger_pressed = False
         self.prev_trigger_pressed = False
+        self.last_gripper_command_width = None
+        self.last_gripper_command_time = None
 
         # Anchors for relative tracking
         self.c0_pos = np.zeros(3)
@@ -221,14 +231,54 @@ class FrankaQuestTeleop(Node):
             self.get_logger().info(f'{self.side.capitalize()} grip deadman {state}.')
             self.last_logged_grip_pressed = self.grip_pressed
 
-        # Rising edge trigger for gripper
-        if self.trigger_pressed and not self.prev_trigger_pressed:
-            self.command_gripper(self.gripper_closed_width)
-        # Falling edge trigger for gripper
-        elif not self.trigger_pressed and self.prev_trigger_pressed:
-            self.command_gripper(self.gripper_open_width)
-            
+        trigger_value = self.trigger_value_from_joy(msg)
+        target_width = self.gripper_width_from_trigger(trigger_value)
+        self.command_gripper_if_needed(target_width)
         self.prev_trigger_pressed = self.trigger_pressed
+
+    def trigger_value_from_joy(self, msg):
+        try:
+            axis_index = int(self.gripper_trigger_axis_index)
+        except (TypeError, ValueError):
+            axis_index = 3
+
+        if len(msg.axes) > axis_index:
+            try:
+                return min(max(float(msg.axes[axis_index]), 0.0), 1.0)
+            except (TypeError, ValueError):
+                pass
+
+        return 1.0 if self.trigger_pressed else 0.0
+
+    def gripper_width_from_trigger(self, trigger_value):
+        open_width = float(self.gripper_open_width)
+        closed_width = float(self.gripper_closed_width)
+        return self.clamp_gripper_width(open_width - trigger_value * (open_width - closed_width))
+
+    def clamp_gripper_width(self, width):
+        max_width = float(self.gripper_max_command_width)
+        closed_width = float(self.gripper_closed_width)
+        min_width = min(closed_width, max_width)
+        max_width = max(closed_width, max_width)
+        clamped_width = min(max(float(width), min_width), max_width)
+        if clamped_width != float(width):
+            self.get_logger().warn(
+                f'Clamped gripper command from {float(width):.6f} to {clamped_width:.6f}.',
+                throttle_duration_sec=2.0,
+            )
+        return clamped_width
+
+    def command_gripper_if_needed(self, width):
+        now = self.get_clock().now()
+        if self.last_gripper_command_width is not None and self.last_gripper_command_time is not None:
+            width_delta = abs(float(width) - float(self.last_gripper_command_width))
+            elapsed = (now - self.last_gripper_command_time).nanoseconds * 1e-9
+            if width_delta < float(self.gripper_command_min_delta) or elapsed < float(self.gripper_command_period):
+                return
+
+        self.last_gripper_command_width = float(width)
+        self.last_gripper_command_time = now
+        self.command_gripper(width)
 
     def command_gripper(self, width):
         if not self.gripper_client.server_is_ready():
@@ -239,7 +289,7 @@ class FrankaQuestTeleop(Node):
             return
 
         goal = GripperCommand.Goal()
-        goal.command.position = float(width)
+        goal.command.position = self.clamp_gripper_width(width)
         goal.command.max_effort = float(self.gripper_max_effort)
         self.gripper_client.send_goal_async(goal)
 

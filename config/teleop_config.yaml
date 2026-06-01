@@ -8,8 +8,15 @@ left:
   twist_topic: /left/servo_node/delta_twist_cmds
   gripper_action: /left_hand_controller/gripper_cmd
   servo_start_service: /left/servo_node/start_servo
+  gripper_open_width: 0.020
+  gripper_closed_width: 0.0
+  gripper_max_command_width: 0.020
+  gripper_max_effort: 20.0
+  gripper_trigger_axis_index: 3
+  gripper_command_period: 0.1
+  gripper_command_min_delta: 0.001
   linear_multiplier: 0.9
-  angular_multiplier: 0.0
+  angular_multiplier: 0.9
   kp_linear: 8.0
   kp_angular: 8.0
   collision_distance: 0.20
@@ -33,8 +40,15 @@ right:
   twist_topic: /right/servo_node/delta_twist_cmds
   gripper_action: /right_hand_controller/gripper_cmd
   servo_start_service: /right/servo_node/start_servo
+  gripper_open_width: 0.020
+  gripper_closed_width: 0.0
+  gripper_max_command_width: 0.020
+  gripper_max_effort: 20.0
+  gripper_trigger_axis_index: 3
+  gripper_command_period: 0.1
+  gripper_command_min_delta: 0.001
   linear_multiplier: 0.9
-  angular_multiplier: 0.0
+  angular_multiplier: 0.9
   kp_linear: 8.0
   kp_angular: 8.0
   collision_distance: 0.20
