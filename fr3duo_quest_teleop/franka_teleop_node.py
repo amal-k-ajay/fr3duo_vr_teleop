@@ -7,7 +7,6 @@ from scipy.spatial.transform import Rotation as R
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from sensor_msgs.msg import Joy
 from control_msgs.action import GripperCommand
-from rcl_interfaces.msg import ParameterDescriptor
 from std_srvs.srv import Trigger
 
 from rclpy.action import ActionClient
@@ -41,16 +40,14 @@ class FrankaQuestTeleop(Node):
         self.declare_parameter('gripper_command_period', 0.1)
         self.declare_parameter('gripper_command_min_delta', 0.001)
         self.declare_parameter('servo_start_service', '')
-        axis_parameter_descriptor = ParameterDescriptor(dynamic_typing=True)
-        self.declare_parameter('controller_forward_axis', 'z', axis_parameter_descriptor)
-        self.declare_parameter('controller_left_axis', 'x', axis_parameter_descriptor)
-        self.declare_parameter('controller_up_axis', 'y', axis_parameter_descriptor)
-        self.declare_parameter('controller_forward_sign', -1.0)
-        self.declare_parameter('controller_left_sign', -1.0)
-        self.declare_parameter('controller_up_sign', 1.0)
-        self.declare_parameter('controller_roll_sign', 1.0)
-        self.declare_parameter('controller_pitch_sign', 1.0)
-        self.declare_parameter('controller_yaw_sign', -1.0)
+        self.declare_parameter(
+            'controller_to_robot_rotation',
+            [
+                0.0, 0.0, -1.0,
+                -1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0,
+            ],
+        )
 
         self.side = self.get_parameter('hand_side').value
         self.lin_mult = self.get_parameter('linear_multiplier').value
@@ -65,15 +62,7 @@ class FrankaQuestTeleop(Node):
         self.gripper_trigger_axis_index = self.get_parameter('gripper_trigger_axis_index').value
         self.gripper_command_period = self.get_parameter('gripper_command_period').value
         self.gripper_command_min_delta = self.get_parameter('gripper_command_min_delta').value
-        self.controller_forward_axis = self.get_parameter('controller_forward_axis').value
-        self.controller_left_axis = self.get_parameter('controller_left_axis').value
-        self.controller_up_axis = self.get_parameter('controller_up_axis').value
-        self.controller_forward_sign = self.get_parameter('controller_forward_sign').value
-        self.controller_left_sign = self.get_parameter('controller_left_sign').value
-        self.controller_up_sign = self.get_parameter('controller_up_sign').value
-        self.controller_roll_sign = self.get_parameter('controller_roll_sign').value
-        self.controller_pitch_sign = self.get_parameter('controller_pitch_sign').value
-        self.controller_yaw_sign = self.get_parameter('controller_yaw_sign').value
+        self.controller_to_robot_rotation = self.load_controller_to_robot_rotation()
 
         side_prefix = 'left_fr3v2' if self.side == 'left' else 'right_fr3v2'
         other_prefix = 'right_fr3v2' if self.side == 'left' else 'left_fr3v2'
@@ -131,6 +120,21 @@ class FrankaQuestTeleop(Node):
         value = self.get_parameter(name).value
         return value if value else default
 
+    def load_controller_to_robot_rotation(self):
+        values = self.get_parameter('controller_to_robot_rotation').value
+        matrix = np.array(values, dtype=float)
+        if matrix.size != 9:
+            raise ValueError(
+                'controller_to_robot_rotation must contain exactly 9 values.'
+            )
+        matrix = matrix.reshape((3, 3))
+        if not np.allclose(matrix @ matrix.T, np.eye(3), atol=1e-3):
+            self.get_logger().warn(
+                'controller_to_robot_rotation is not orthonormal; movement '
+                'may scale or skew unexpectedly.'
+            )
+        return matrix
+
     def start_servo_if_needed(self):
         if self.servo_started:
             self.servo_start_timer.cancel()
@@ -162,37 +166,12 @@ class FrankaQuestTeleop(Node):
         self.servo_start_future = self.servo_start_client.call_async(Trigger.Request())
 
     def controller_delta_to_robot_delta(self, controller_delta):
-        # Map Quest/OpenXR position deltas into the shared robot command frame.
-        # Defaults assume Quest X=right, Y=up, Z=back and robot X=forward, Y=left, Z=up.
-        return np.array([
-            self.controller_forward_sign * self.controller_axis_value(controller_delta, self.controller_forward_axis),
-            self.controller_left_sign * self.controller_axis_value(controller_delta, self.controller_left_axis),
-            self.controller_up_sign * self.controller_axis_value(controller_delta, self.controller_up_axis),
-        ])
+        return self.controller_to_robot_rotation @ controller_delta
 
-    def controller_axis_value(self, controller_delta, axis_name):
-        axis_indices = {'x': 0, 'y': 1, 'z': 2}
-        axis = self.normalize_controller_axis(axis_name)
-        if axis not in axis_indices:
-            self.get_logger().warn(
-                f"Invalid controller axis '{axis_name}'. Expected one of x, y, z. Using 0.0.",
-                throttle_duration_sec=2.0,
-            )
-            return 0.0
-        return controller_delta[axis_indices[axis]]
-
-    def normalize_controller_axis(self, axis_name):
-        # Some ROS/YAML paths can still parse the scalar y as boolean True.
-        if isinstance(axis_name, bool):
-            return 'y' if axis_name else ''
-        return str(axis_name).lower()
-
-    def apply_rotation_direction_mapping(self, rot_vec):
-        return np.array([
-            self.controller_roll_sign * rot_vec[0],
-            self.controller_pitch_sign * rot_vec[1],
-            self.controller_yaw_sign * rot_vec[2],
-        ])
+    def controller_rotation_to_robot_rotation(self, controller_rotation):
+        controller_rot_vec = controller_rotation.as_rotvec()
+        robot_rot_vec = self.controller_to_robot_rotation @ controller_rot_vec
+        return R.from_rotvec(robot_rot_vec)
 
     def get_robot_pose(self):
         """Looks up the current end-effector pose via TF."""
@@ -345,13 +324,13 @@ class FrankaQuestTeleop(Node):
             delta_rot = c_rot * self.c0_rot.inv()
             
             # Target robot orientation
-            target_rot = delta_rot * self.r0_rot
+            target_rot = self.controller_rotation_to_robot_rotation(delta_rot) * self.r0_rot
             
             # Calculate orientation error (Target * Current_Inv)
             error_rot = target_rot * r_rot.inv()
             
             # Convert error to axis-angle (which translates directly to angular velocity vector)
-            rot_vec = self.apply_rotation_direction_mapping(error_rot.as_rotvec())
+            rot_vec = error_rot.as_rotvec()
             twist_msg.twist.angular.x = self.kp_ang * rot_vec[0] * self.ang_mult
             twist_msg.twist.angular.y = self.kp_ang * rot_vec[1] * self.ang_mult
             twist_msg.twist.angular.z = self.kp_ang * rot_vec[2] * self.ang_mult

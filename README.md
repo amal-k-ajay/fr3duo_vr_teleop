@@ -238,6 +238,7 @@ button_topic: /oculus/left_controller_buttons
 twist_topic: /left/servo_node/delta_twist_cmds
 gripper_action: /left_hand_controller/gripper_cmd
 servo_start_service: /left/servo_node/start_servo
+controller_to_robot_rotation: [0.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
 ```
 
 The hardware launch overrides `base_frame`, `ee_frame`, `other_ee_frame`,
@@ -267,18 +268,28 @@ To disable rotation and tune linear motion only:
 angular_multiplier: 0.0
 ```
 
-Linear axis mapping:
+Controller-to-robot rotation:
 
 ```yaml
-controller_forward_axis: "z"
-controller_left_axis: "x"
-controller_up_axis: "y"
-controller_forward_sign: -1.0
-controller_left_sign: -1.0
-controller_up_sign: 1.0
+controller_to_robot_rotation: [0.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
 ```
 
-This means:
+This is a row-major 3x3 matrix:
+
+```text
+[r00, r01, r02,
+ r10, r11, r12,
+ r20, r21, r22]
+```
+
+The teleop node applies it to Quest controller deltas before computing the
+robot target:
+
+```text
+robot_delta = controller_to_robot_rotation * quest_delta
+```
+
+The default matrix preserves the old linear behavior:
 
 ```text
 robot base X/forward <- Quest z * -1
@@ -286,17 +297,18 @@ robot base Y/left    <- Quest x * -1
 robot base Z/up      <- Quest y *  1
 ```
 
-If moving the controller forward affects the wrong robot direction, swap the axis names. If the axis is correct but reversed, flip the sign.
-
-Rotation direction mapping:
+The same matrix is also applied to controller rotation vectors before
+orientation tracking. If each robot is mounted at a different angle relative to
+the Meta Quest/control coordinate system, set a different matrix in the `left`
+and `right` sections.
 
 ```yaml
-controller_roll_sign: 1.0
-controller_pitch_sign: 1.0
-controller_yaw_sign: -1.0
-```
+left:
+  controller_to_robot_rotation: [...]
 
-Flip between `1.0` and `-1.0` if a rotation direction feels inverted.
+right:
+  controller_to_robot_rotation: [...]
+```
 
 Safety distance:
 

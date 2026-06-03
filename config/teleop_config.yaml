@@ -18,19 +18,11 @@ left:
   gripper_command_period: 0.1
   gripper_command_min_delta: 0.001
   linear_multiplier: 0.9
-  angular_multiplier: 0.0
+  angular_multiplier: 0.9
   kp_linear: 20.0
   kp_angular: 20.0
-  collision_distance: 0.20
-  controller_forward_axis: "z"
-  controller_left_axis: "x"
-  controller_up_axis: "y"
-  controller_forward_sign: -1.0
-  controller_left_sign: -1.0
-  controller_up_sign: 1.0
-  controller_roll_sign: -1.0
-  controller_pitch_sign: -1.0
-  controller_yaw_sign: 1.0
+  collision_distance: 0.0
+  controller_to_robot_rotation: [0.440 ,0.174 ,-0.881 , -0.500, -0.767, -0.401, -0.746,  0.617, -0.251 ]
 
 right:
   hand_side: right
@@ -50,16 +42,8 @@ right:
   gripper_command_period: 0.1
   gripper_command_min_delta: 0.001
   linear_multiplier: 0.9
-  angular_multiplier: 0.0
+  angular_multiplier: 0.9
   kp_linear: 8.0
   kp_angular: 8.0
   collision_distance: 0.20
-  controller_forward_axis: "z"
-  controller_left_axis: "x"
-  controller_up_axis: "y"
-  controller_forward_sign: -1.0
-  controller_left_sign: -1.0
-  controller_up_sign: 1.0
-  controller_roll_sign: 1.0
-  controller_pitch_sign: 1.0
-  controller_yaw_sign: -1.0
+  controller_to_robot_rotation: [-0.440 , 0.174, -0.881, -0.500 , 0.767 , 0.401, 0.746 , 0.617, -0.251 ]

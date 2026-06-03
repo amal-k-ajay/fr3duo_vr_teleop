@@ -123,10 +123,10 @@ def teleop_params_for_arm(
         'servo_start_service': f'/{namespace}/servo_node/start_servo',
         'gripper_action': f'/{namespace}/franka_gripper/gripper_action',
         # Conservative defaults for first real-robot tests.
-        'linear_multiplier': 0.5,
-        'angular_multiplier': 0.5,
-        'kp_linear': 1.0,
-        'kp_angular': 0.8,
+        'linear_multiplier': 0.7,
+        'angular_multiplier': 0.7,
+        'kp_linear': 0.6,
+        'kp_angular': 0.6,
         'collision_distance': 0.35,
     })
     return params
