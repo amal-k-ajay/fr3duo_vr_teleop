@@ -7,6 +7,7 @@ from scipy.spatial.transform import Rotation as R
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from sensor_msgs.msg import Joy
 from control_msgs.action import GripperCommand
+from franka_msgs.action import Homing
 from std_srvs.srv import Trigger
 
 from rclpy.action import ActionClient
@@ -32,13 +33,15 @@ class FrankaQuestTeleop(Node):
         self.declare_parameter('button_topic', '')
         self.declare_parameter('twist_topic', '')
         self.declare_parameter('gripper_action', '')
-        self.declare_parameter('gripper_open_width', 0.020)
+        self.declare_parameter('gripper_homing_action', '')
+        self.declare_parameter('gripper_open_width', 0.080)
         self.declare_parameter('gripper_closed_width', 0.0)
-        self.declare_parameter('gripper_max_command_width', 0.020)
+        self.declare_parameter('gripper_max_command_width', 0.080)
         self.declare_parameter('gripper_max_effort', 20.0)
         self.declare_parameter('gripper_trigger_axis_index', 3)
-        self.declare_parameter('gripper_command_period', 0.1)
-        self.declare_parameter('gripper_command_min_delta', 0.001)
+        self.declare_parameter('gripper_trigger_threshold', 0.5)
+        self.declare_parameter('gripper_open_on_start', True)
+        self.declare_parameter('gripper_homing_on_start', False)
         self.declare_parameter('servo_start_service', '')
         self.declare_parameter(
             'controller_to_robot_rotation',
@@ -60,8 +63,9 @@ class FrankaQuestTeleop(Node):
         self.gripper_max_command_width = self.get_parameter('gripper_max_command_width').value
         self.gripper_max_effort = self.get_parameter('gripper_max_effort').value
         self.gripper_trigger_axis_index = self.get_parameter('gripper_trigger_axis_index').value
-        self.gripper_command_period = self.get_parameter('gripper_command_period').value
-        self.gripper_command_min_delta = self.get_parameter('gripper_command_min_delta').value
+        self.gripper_trigger_threshold = self.get_parameter('gripper_trigger_threshold').value
+        self.gripper_open_on_start = self.get_parameter('gripper_open_on_start').value
+        self.gripper_homing_on_start = self.get_parameter('gripper_homing_on_start').value
         self.controller_to_robot_rotation = self.load_controller_to_robot_rotation()
 
         side_prefix = 'left_fr3v2' if self.side == 'left' else 'right_fr3v2'
@@ -75,6 +79,10 @@ class FrankaQuestTeleop(Node):
         self.gripper_action_name = self._param_or_default(
             'gripper_action',
             f'/{self.side}_hand_controller/gripper_cmd',
+        )
+        self.gripper_homing_action_name = self._param_or_default(
+            'gripper_homing_action',
+            '',
         )
         self.servo_start_service = self._param_or_default(
             'servo_start_service',
@@ -91,6 +99,13 @@ class FrankaQuestTeleop(Node):
         self.pose_sub = self.create_subscription(PoseStamped, self.pose_topic, self.pose_cb, 10)
         self.button_sub = self.create_subscription(Joy, self.button_topic, self.button_cb, 10)
         self.gripper_client = ActionClient(self, GripperCommand, self.gripper_action_name)
+        self.gripper_homing_client = None
+        if self.gripper_homing_action_name:
+            self.gripper_homing_client = ActionClient(
+                self,
+                Homing,
+                self.gripper_homing_action_name,
+            )
         self.servo_start_client = self.create_client(Trigger, self.servo_start_service)
 
         # --- State Tracking ---
@@ -99,8 +114,7 @@ class FrankaQuestTeleop(Node):
         self.last_logged_grip_pressed = False
         self.trigger_pressed = False
         self.prev_trigger_pressed = False
-        self.last_gripper_command_width = None
-        self.last_gripper_command_time = None
+        self.gripper_is_open = True
 
         # Anchors for relative tracking
         self.c0_pos = np.zeros(3)
@@ -110,6 +124,12 @@ class FrankaQuestTeleop(Node):
         self.servo_started = False
         self.servo_start_future = None
         self.servo_start_timer = self.create_timer(1.0, self.start_servo_if_needed)
+        self.gripper_start_opened = False
+        self.gripper_start_open_timer = None
+        self.gripper_homing_goal_future = None
+        self.gripper_homing_result_future = None
+        if self.gripper_open_on_start or self.gripper_homing_on_start:
+            self.gripper_start_open_timer = self.create_timer(1.0, self.open_gripper_on_start)
 
         self.get_logger().info(
             f"{self.side.capitalize()} teleop: {self.pose_topic} -> {self.twist_topic}, "
@@ -165,6 +185,83 @@ class FrankaQuestTeleop(Node):
 
         self.servo_start_future = self.servo_start_client.call_async(Trigger.Request())
 
+    def open_gripper_on_start(self):
+        if self.gripper_start_opened:
+            if self.gripper_start_open_timer is not None:
+                self.gripper_start_open_timer.cancel()
+            return
+
+        if self.gripper_homing_on_start and self.gripper_homing_client is not None:
+            if self.home_gripper_on_start():
+                self.gripper_start_opened = True
+                self.gripper_is_open = True
+                if self.gripper_start_open_timer is not None:
+                    self.gripper_start_open_timer.cancel()
+            return
+
+        if not self.gripper_client.server_is_ready():
+            self.get_logger().warn(
+                f"Waiting for gripper action {self.gripper_action_name} before startup open.",
+                throttle_duration_sec=3.0,
+            )
+            return
+
+        self.gripper_is_open = True
+        self.command_gripper(self.gripper_open_width)
+        self.gripper_start_opened = True
+        self.get_logger().info(
+            f'{self.side.capitalize()} gripper initialized open '
+            f'to {float(self.gripper_open_width):.6f} m.'
+        )
+        if self.gripper_start_open_timer is not None:
+            self.gripper_start_open_timer.cancel()
+
+    def home_gripper_on_start(self):
+        if self.gripper_homing_result_future is not None:
+            if not self.gripper_homing_result_future.done():
+                return False
+            result = self.gripper_homing_result_future.result().result
+            if result.success:
+                self.get_logger().info(
+                    f'{self.side.capitalize()} gripper homed and initialized fully open.'
+                )
+                return True
+            self.get_logger().warn(
+                f'{self.side.capitalize()} gripper homing failed: {result.error}. '
+                'Falling back to configured open width.'
+            )
+            self.gripper_homing_on_start = False
+            return False
+
+        if self.gripper_homing_goal_future is not None:
+            if not self.gripper_homing_goal_future.done():
+                return False
+            goal_handle = self.gripper_homing_goal_future.result()
+            if not goal_handle.accepted:
+                self.get_logger().warn(
+                    f'{self.side.capitalize()} gripper homing goal was rejected. '
+                    'Falling back to configured open width.'
+                )
+                self.gripper_homing_on_start = False
+                return False
+            self.gripper_homing_result_future = goal_handle.get_result_async()
+            return False
+
+        if not self.gripper_homing_client.server_is_ready():
+            self.get_logger().warn(
+                f"Waiting for gripper homing action {self.gripper_homing_action_name}.",
+                throttle_duration_sec=3.0,
+            )
+            return False
+
+        self.get_logger().info(
+            f'{self.side.capitalize()} gripper homing on startup.'
+        )
+        self.gripper_homing_goal_future = self.gripper_homing_client.send_goal_async(
+            Homing.Goal()
+        )
+        return False
+
     def controller_delta_to_robot_delta(self, controller_delta):
         return self.controller_to_robot_rotation @ controller_delta
 
@@ -207,16 +304,16 @@ class FrankaQuestTeleop(Node):
             self.get_logger().warn('Ignoring Joy message with fewer than 3 buttons.', throttle_duration_sec=2.0)
             return
         self.grip_pressed = bool(msg.buttons[1])
-        self.trigger_pressed = bool(msg.buttons[2])
+        trigger_value = self.trigger_value_from_joy(msg)
+        self.trigger_pressed = trigger_value > float(self.gripper_trigger_threshold)
 
         if self.grip_pressed != self.last_logged_grip_pressed:
             state = 'pressed' if self.grip_pressed else 'released'
             self.get_logger().info(f'{self.side.capitalize()} grip deadman {state}.')
             self.last_logged_grip_pressed = self.grip_pressed
 
-        trigger_value = self.trigger_value_from_joy(msg)
-        target_width = self.gripper_width_from_trigger(trigger_value)
-        self.command_gripper_if_needed(target_width)
+        if self.trigger_pressed and not self.prev_trigger_pressed:
+            self.toggle_gripper()
         self.prev_trigger_pressed = self.trigger_pressed
 
     def trigger_value_from_joy(self, msg):
@@ -231,12 +328,16 @@ class FrankaQuestTeleop(Node):
             except (TypeError, ValueError):
                 pass
 
-        return 1.0 if self.trigger_pressed else 0.0
+        return 1.0 if len(msg.buttons) > 2 and bool(msg.buttons[2]) else 0.0
 
-    def gripper_width_from_trigger(self, trigger_value):
-        open_width = float(self.gripper_open_width)
-        closed_width = float(self.gripper_closed_width)
-        return self.clamp_gripper_width(open_width - trigger_value * (open_width - closed_width))
+    def toggle_gripper(self):
+        self.gripper_is_open = not self.gripper_is_open
+        target_width = (
+            self.gripper_open_width if self.gripper_is_open else self.gripper_closed_width
+        )
+        state = 'open' if self.gripper_is_open else 'closed'
+        self.get_logger().info(f'{self.side.capitalize()} gripper toggled {state}.')
+        self.command_gripper(target_width)
 
     def clamp_gripper_width(self, width):
         max_width = float(self.gripper_max_command_width)
@@ -251,18 +352,6 @@ class FrankaQuestTeleop(Node):
             )
         return clamped_width
 
-    def command_gripper_if_needed(self, width):
-        now = self.get_clock().now()
-        if self.last_gripper_command_width is not None and self.last_gripper_command_time is not None:
-            width_delta = abs(float(width) - float(self.last_gripper_command_width))
-            elapsed = (now - self.last_gripper_command_time).nanoseconds * 1e-9
-            if width_delta < float(self.gripper_command_min_delta) or elapsed < float(self.gripper_command_period):
-                return
-
-        self.last_gripper_command_width = float(width)
-        self.last_gripper_command_time = now
-        self.command_gripper(width)
-
     def command_gripper(self, width):
         if not self.gripper_client.server_is_ready():
             self.get_logger().warn(
@@ -272,7 +361,7 @@ class FrankaQuestTeleop(Node):
             return
 
         goal = GripperCommand.Goal()
-        goal.command.position = self.clamp_gripper_width(width)
+        goal.command.position = 0.5 * self.clamp_gripper_width(width)
         goal.command.max_effort = float(self.gripper_max_effort)
         self.gripper_client.send_goal_async(goal)
 

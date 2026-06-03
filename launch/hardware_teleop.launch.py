@@ -122,12 +122,14 @@ def teleop_params_for_arm(
         'twist_topic': f'/{namespace}/servo_node/delta_twist_cmds',
         'servo_start_service': f'/{namespace}/servo_node/start_servo',
         'gripper_action': f'/{namespace}/franka_gripper/gripper_action',
+        'gripper_homing_action': f'/{namespace}/franka_gripper/homing',
+        'gripper_homing_on_start': True,
         # Conservative defaults for first real-robot tests.
-        'linear_multiplier': 0.7,
-        'angular_multiplier': 0.7,
-        'kp_linear': 0.6,
-        'kp_angular': 0.6,
-        'collision_distance': 0.35,
+        'linear_multiplier': 1.0,
+        'angular_multiplier': 1.0,
+        'kp_linear': 0.8,
+        'kp_angular': 0.8,
+        'collision_distance': 0.2,
     })
     return params
 

@@ -238,11 +238,18 @@ button_topic: /oculus/left_controller_buttons
 twist_topic: /left/servo_node/delta_twist_cmds
 gripper_action: /left_hand_controller/gripper_cmd
 servo_start_service: /left/servo_node/start_servo
+gripper_open_width: 0.08
+gripper_closed_width: 0.0
+gripper_max_command_width: 0.08
+gripper_open_on_start: true
+gripper_homing_on_start: false
+gripper_trigger_threshold: 0.5
 controller_to_robot_rotation: [0.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
 ```
 
 The hardware launch overrides `base_frame`, `ee_frame`, `other_ee_frame`,
-`twist_topic`, `servo_start_service`, and `gripper_action` for each real arm.
+`twist_topic`, `servo_start_service`, `gripper_action`,
+`gripper_homing_action`, and `gripper_homing_on_start` for each real arm.
 By default, hardware teleop uses `left_fr3_link0` and `right_fr3_link0` as the
 per-arm base frames.
 
@@ -261,6 +268,24 @@ Meaning:
 - `kp_linear`: how fast the robot chases the target position
 - `angular_multiplier`: how much controller rotation affects robot orientation
 - `kp_angular`: how fast the robot chases target orientation
+- `gripper_trigger_threshold`: trigger value above which a new press toggles
+  the gripper between open and closed
+- `gripper_open_width`: physical total gap between fingertips for the open
+  toggle position, in meters
+- `gripper_closed_width`: physical total gap between fingertips for the closed
+  toggle position, in meters
+- `gripper_max_command_width`: maximum physical total fingertip gap that teleop
+  is allowed to command, in meters
+- `gripper_open_on_start`: command `gripper_open_width` once when the gripper
+  action server becomes available
+- `gripper_homing_on_start`: for hardware, home the Franka gripper during
+  startup so it opens fully and updates the gripper server's calibrated
+  `max_width`
+
+The Franka Hand nominal maximum opening is 0.08 m. The hardware gripper server
+still validates against its runtime calibrated `max_width`; if it reports a much
+smaller value, home the gripper and check for mechanical limits or mounted
+fingers that reduce the usable travel.
 
 To disable rotation and tune linear motion only:
 
