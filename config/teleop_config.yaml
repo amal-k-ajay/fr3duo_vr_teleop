@@ -1,6 +1,8 @@
+common_base_frame: mount_link
+
 left:
   hand_side: left
-  base_frame: base
+  base_frame: mount_link
   ee_frame: left_fr3v2_hand_tcp
   other_ee_frame: right_fr3v2_hand_tcp
   pose_topic: /oculus/left_controller_pose
@@ -16,9 +18,9 @@ left:
   gripper_command_period: 0.1
   gripper_command_min_delta: 0.001
   linear_multiplier: 0.9
-  angular_multiplier: 0.9
-  kp_linear: 8.0
-  kp_angular: 8.0
+  angular_multiplier: 0.0
+  kp_linear: 20.0
+  kp_angular: 20.0
   collision_distance: 0.20
   controller_forward_axis: "z"
   controller_left_axis: "x"
@@ -26,13 +28,13 @@ left:
   controller_forward_sign: -1.0
   controller_left_sign: -1.0
   controller_up_sign: 1.0
-  controller_roll_sign: 1.0
-  controller_pitch_sign: 1.0
-  controller_yaw_sign: -1.0
+  controller_roll_sign: -1.0
+  controller_pitch_sign: -1.0
+  controller_yaw_sign: 1.0
 
 right:
   hand_side: right
-  base_frame: base
+  base_frame: mount_link
   ee_frame: right_fr3v2_hand_tcp
   other_ee_frame: left_fr3v2_hand_tcp
   pose_topic: /oculus/right_controller_pose
@@ -48,7 +50,7 @@ right:
   gripper_command_period: 0.1
   gripper_command_min_delta: 0.001
   linear_multiplier: 0.9
-  angular_multiplier: 0.9
+  angular_multiplier: 0.0
   kp_linear: 8.0
   kp_angular: 8.0
   collision_distance: 0.20

@@ -75,13 +75,13 @@ ros2 launch fr3duo_quest_teleop teleop_vr.launch.py \
   launch_rviz:=true
 ```
 
-The simulation launch uses `common_base_frame:=base` by default. This is the shared root frame in `fr3_duo_moveit_config`.
+The simulation launch uses the top-level `common_base_frame` from `config/teleop_config.yaml` by default. It is set to `mount_link`, the shared mount frame in `fr3_duo_moveit_config`.
 
 You can override it:
 
 ```bash
 ros2 launch fr3duo_quest_teleop teleop_vr.launch.py \
-  common_base_frame:=base \
+  common_base_frame:=mount_link \
   launch_oculus_bridge:=true \
   launch_rviz:=true
 ```
@@ -103,8 +103,8 @@ cd /home/amal/franka_ros2_ws
 source install/setup.bash
 
 ros2 launch fr3duo_quest_teleop hardware_teleop.launch.py \
-  left_robot_ip:=<LEFT_FR3_FCI_IP> \
-  right_robot_ip:=<RIGHT_FR3_FCI_IP>
+  left_robot_ip:=192.168.2.102 \
+  right_robot_ip:=192.168.2.101
 ```
 
 Safer first hardware test without Quest:
@@ -129,6 +129,19 @@ The hardware launch uses:
 /right/franka_gripper/gripper_action
 ```
 
+On hardware, each MoveIt Servo node uses the single-arm Franka model, so its
+Cartesian command frame must be a link in that arm's model. The defaults are:
+
+```text
+left_command_frame:=left_fr3_link0
+right_command_frame:=right_fr3_link0
+```
+
+Do not use `mount_link` as the hardware Servo command frame unless that link is
+part of each single-arm robot model. If Servo logs `Link 'mount_link' not found
+in model 'fr3'`, it has crashed and the teleop Twist commands cannot move the
+robot.
+
 Check controllers:
 
 ```bash
@@ -143,15 +156,21 @@ ros2 topic echo /left/joint_states --once
 ros2 topic echo /right/joint_states --once
 ```
 
-## Common Base Frame
+## Command Frames
 
-Both simulation and hardware launch files accept:
+The simulation launch accepts:
 
 ```bash
-common_base_frame:=base
+common_base_frame:=mount_link
 ```
 
-In simulation, `base` is the shared root of the dual-arm URDF:
+The default comes from `config/teleop_config.yaml`:
+
+```yaml
+common_base_frame: mount_link
+```
+
+In simulation, `mount_link` is the shared mount frame of the dual-arm URDF:
 
 ```text
 base
@@ -165,8 +184,8 @@ base
 Verify simulation TF:
 
 ```bash
-ros2 run tf2_ros tf2_echo base left_fr3v2_link0
-ros2 run tf2_ros tf2_echo base right_fr3v2_link0
+ros2 run tf2_ros tf2_echo mount_link left_fr3v2_link0
+ros2 run tf2_ros tf2_echo mount_link right_fr3v2_link0
 ```
 
 Verify command frame:
@@ -179,21 +198,27 @@ Expected:
 
 ```yaml
 header:
-  frame_id: base
+  frame_id: mount_link
 ```
 
-For real hardware, `base` must exist in TF and represent your calibrated shared workcell frame. If you use a different calibrated frame, launch with:
+For real hardware, Servo command frames are per arm by default:
 
 ```bash
-common_base_frame:=cell_base
+left_command_frame:=left_fr3_link0
+right_command_frame:=right_fr3_link0
 ```
 
-Then make sure these transforms exist:
+These frames must exist in each single-arm MoveIt robot model. Verify hardware
+command frames:
 
 ```bash
-ros2 run tf2_ros tf2_echo cell_base left_fr3_link0
-ros2 run tf2_ros tf2_echo cell_base right_fr3_link0
+ros2 param get /left/servo_node moveit_servo.planning_frame
+ros2 param get /right/servo_node moveit_servo.planning_frame
+ros2 topic echo /left/servo_node/delta_twist_cmds --once
 ```
+
+The left Twist header should be `left_fr3_link0`; the right Twist header should
+be `right_fr3_link0`.
 
 ## Config Files
 
@@ -204,7 +229,8 @@ Main teleop tuning file. It has one section for `left` and one for `right`.
 Important fields:
 
 ```yaml
-base_frame: base
+common_base_frame: mount_link
+base_frame: mount_link
 ee_frame: left_fr3v2_hand_tcp
 other_ee_frame: right_fr3v2_hand_tcp
 pose_topic: /oculus/left_controller_pose
@@ -213,6 +239,11 @@ twist_topic: /left/servo_node/delta_twist_cmds
 gripper_action: /left_hand_controller/gripper_cmd
 servo_start_service: /left/servo_node/start_servo
 ```
+
+The hardware launch overrides `base_frame`, `ee_frame`, `other_ee_frame`,
+`twist_topic`, `servo_start_service`, and `gripper_action` for each real arm.
+By default, hardware teleop uses `left_fr3_link0` and `right_fr3_link0` as the
+per-arm base frames.
 
 Motion scaling:
 

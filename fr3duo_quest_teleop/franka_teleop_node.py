@@ -202,7 +202,11 @@ class FrankaQuestTeleop(Node):
             quat = [trans.transform.rotation.x, trans.transform.rotation.y, trans.transform.rotation.z, trans.transform.rotation.w]
             rot = R.from_quat(quat)
             return pos, rot
-        except (LookupException, ConnectivityException, ExtrapolationException) as e:
+        except (
+            LookupException,
+            ConnectivityException,
+            ExtrapolationException,
+        ) as e:
             self.get_logger().debug(f"TF Lookup failed: {e}")
             return None, None
 
@@ -370,10 +374,11 @@ class FrankaQuestTeleop(Node):
         twist_msg.twist.angular.z = 0.0
         self.twist_pub.publish(twist_msg)
 
+
 def main(args=None):
     rclpy.init(args=args)
     node = FrankaQuestTeleop()
-    
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
@@ -381,6 +386,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

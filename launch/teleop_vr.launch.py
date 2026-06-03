@@ -66,6 +66,7 @@ def generate_launch_description():
     kinematics_config = load_yaml(moveit_pkg, 'config/kinematics.yaml')
     common_servo_config = load_yaml(teleop_pkg, 'config/fr3_servo_config.yaml')
     teleop_config = load_yaml(teleop_pkg, 'config/teleop_config.yaml')
+    common_base_frame_default = teleop_config.get('common_base_frame', 'mount_link')
 
     moveit_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -166,7 +167,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'common_base_frame',
-            default_value='base',
+            default_value=common_base_frame_default,
             description='Shared frame used for both arms Cartesian teleop commands',
         ),
         moveit_launch,
