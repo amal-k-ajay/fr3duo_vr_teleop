@@ -6,9 +6,11 @@ from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
-    TimerAction,
+    LogInfo,
+    RegisterEventHandler,
 )
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit, OnProcessStart
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
     Command,
@@ -124,14 +126,32 @@ def teleop_params_for_arm(
         'gripper_action': f'/{namespace}/franka_gripper/gripper_action',
         'gripper_homing_action': f'/{namespace}/franka_gripper/homing',
         'gripper_homing_on_start': True,
-        # Conservative defaults for first real-robot tests.
+        # Conservative defaults for real-robot tests.
         'linear_multiplier': 1.0,
         'angular_multiplier': 1.0,
         'kp_linear': 0.8,
-        'kp_angular': 0.8,
+        'kp_angular': 0.6,
         'collision_distance': 0.2,
     })
     return params
+
+
+def start_after_success(actions, description):
+    def on_exit(event, context):
+        del context
+        if event.returncode == 0:
+            return actions
+        return [
+            LogInfo(
+                msg=(
+                    f'ERROR: {description} failed with exit code '
+                    f'{event.returncode}; '
+                    'dependent nodes will not start.'
+                )
+            )
+        ]
+
+    return on_exit
 
 
 def generate_launch_description():
@@ -141,7 +161,6 @@ def generate_launch_description():
     right_robot_ip = LaunchConfiguration('right_robot_ip')
     launch_oculus_bridge = LaunchConfiguration('launch_oculus_bridge')
     load_gripper = LaunchConfiguration('load_gripper')
-    teleop_startup_delay = LaunchConfiguration('teleop_startup_delay')
     left_command_frame = LaunchConfiguration('left_command_frame')
     right_command_frame = LaunchConfiguration('right_command_frame')
 
@@ -319,6 +338,37 @@ def generate_launch_description():
         )],
     )
 
+    start_left_servo = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=left_arm_spawner,
+            on_exit=start_after_success(
+                [left_servo],
+                'Left arm controller spawner',
+            ),
+        )
+    )
+    start_right_servo = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=right_arm_spawner,
+            on_exit=start_after_success(
+                [right_servo],
+                'Right arm controller spawner',
+            ),
+        )
+    )
+    start_left_teleop = RegisterEventHandler(
+        event_handler=OnProcessStart(
+            target_action=left_servo,
+            on_start=[left_teleop],
+        )
+    )
+    start_right_teleop = RegisterEventHandler(
+        event_handler=OnProcessStart(
+            target_action=right_servo,
+            on_start=[right_teleop],
+        )
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'left_robot_ip',
@@ -339,13 +389,6 @@ def generate_launch_description():
             description='Connect to the Meta Quest through oculus_reader',
         ),
         DeclareLaunchArgument(
-            'teleop_startup_delay',
-            default_value='25.0',
-            description=(
-                'Seconds to wait before starting Servo and Quest teleop nodes'
-            ),
-        ),
-        DeclareLaunchArgument(
             'left_command_frame',
             default_value='left_fr3_link0',
             description=(
@@ -359,20 +402,13 @@ def generate_launch_description():
                 'Right hardware frame used for Cartesian Servo commands'
             ),
         ),
+        start_left_servo,
+        start_right_servo,
+        start_left_teleop,
+        start_right_teleop,
         left_bringup,
         right_bringup,
-        TimerAction(
-            period=8.0,
-            actions=[left_arm_spawner, right_arm_spawner],
-        ),
-        TimerAction(
-            period=teleop_startup_delay,
-            actions=[
-                left_servo,
-                right_servo,
-                oculus_bridge,
-                left_teleop,
-                right_teleop,
-            ],
-        ),
+        left_arm_spawner,
+        right_arm_spawner,
+        oculus_bridge,
     ])
