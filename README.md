@@ -1,4 +1,4 @@
-# FR3 Duo Quest Teleop
+# FR3 Duo VR Teleop
 
 ROS 2 package for teleoperating a Franka FR3 Duo robot with Meta Quest 3
 controllers.
