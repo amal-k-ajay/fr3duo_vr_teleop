@@ -1,6 +1,6 @@
 # FR3 Duo Quest Teleop
 
-ROS 2 package for teleoperating a dual Franka FR3 setup with Meta Quest 3
+ROS 2 package for teleoperating a Franka FR3 Duo robot with Meta Quest 3
 controllers.
 
 The package provides:
