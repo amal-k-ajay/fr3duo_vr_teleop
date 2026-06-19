@@ -4,8 +4,8 @@
   <name>fr3duo_quest_teleop</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="amal.kaithavalappil@hs-offenburg.de">amal</maintainer>
-  <license>TODO: License declaration</license>
+  <maintainer email="amalkajayagosh@gmail.com">amal</maintainer>
+  <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
   <depend>tf2_ros</depend>
