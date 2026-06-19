@@ -1,0 +1,17 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Sphinx build output
+docs/_build/
+
+# ROS / colcon build artifacts
+build/
+install/
+log/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store

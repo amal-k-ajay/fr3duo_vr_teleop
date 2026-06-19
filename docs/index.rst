@@ -1,17 +1,23 @@
-.. FR3 Duo VR Teleop documentation master file, created by
-   sphinx-quickstart on Thu Jun 18 14:46:43 2026.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+FR3 Duo Quest Teleop
+====================
 
-FR3 Duo VR Teleop documentation
-===============================
+``fr3duo_quest_teleop`` is a ROS 2 package for teleoperating a dual Franka FR3
+setup with Meta Quest controllers.
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
-
+Grip is used as the deadman switch. While grip is held, controller translation
+is mapped to Cartesian end-effector motion through MoveIt Servo. Trigger toggles
+the gripper.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: User Guide
 
+   user_guide
+   configuration
+   runtime_checks
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Python API
+
+   api

@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""ROS 2 node that maps Meta Quest controller input to Franka teleop commands.
+
+The node subscribes to one Quest controller pose topic and one Joy button topic.
+When the grip deadman is held, relative controller motion is converted into
+Cartesian ``TwistStamped`` commands for MoveIt Servo. Trigger presses toggle the
+configured gripper action between open and closed widths.
+"""
+
 import rclpy
 from rclpy.node import Node
 import numpy as np
@@ -16,11 +24,20 @@ from tf2_ros import LookupException, ConnectivityException, ExtrapolationExcepti
 
 
 class FrankaQuestTeleop(Node):
+    """Teleoperate one Franka FR3 arm from one Meta Quest controller.
+
+    A dual-arm launch starts two instances, one with ``arm_side:=left`` and one
+    with ``arm_side:=right``. Each instance owns its own Servo command topic,
+    gripper action client, TF frames, and safety distance check against the
+    opposite end effector.
+    """
+
     def __init__(self):
         super().__init__('franka_teleop_node')
 
         # --- Parameters ---
-        self.declare_parameter('hand_side', 'right')
+        self.declare_parameter('arm_side', '')
+        self.declare_parameter('hand_side', '')
         self.declare_parameter('linear_multiplier', 1.5)
         self.declare_parameter('angular_multiplier', 1.0)
         self.declare_parameter('kp_linear', 4.0)
@@ -52,7 +69,7 @@ class FrankaQuestTeleop(Node):
             ],
         )
 
-        self.side = self.get_parameter('hand_side').value
+        self.side = self.configured_arm_side()
         self.lin_mult = self.get_parameter('linear_multiplier').value
         self.ang_mult = self.get_parameter('angular_multiplier').value
         self.kp_lin = self.get_parameter('kp_linear').value
@@ -137,10 +154,27 @@ class FrankaQuestTeleop(Node):
         )
 
     def _param_or_default(self, name, default):
+        """Return a string parameter value, falling back when it is empty."""
         value = self.get_parameter(name).value
         return value if value else default
 
+    def configured_arm_side(self):
+        """Return the selected arm side, accepting ``hand_side`` as legacy input."""
+        arm_side = self.get_parameter('arm_side').value
+        if arm_side:
+            return arm_side
+
+        hand_side = self.get_parameter('hand_side').value
+        if hand_side:
+            self.get_logger().warn(
+                'Parameter hand_side is deprecated; use arm_side instead.'
+            )
+            return hand_side
+
+        return 'right'
+
     def load_controller_to_robot_rotation(self):
+        """Load and validate the row-major controller-to-robot rotation matrix."""
         values = self.get_parameter('controller_to_robot_rotation').value
         matrix = np.array(values, dtype=float)
         if matrix.size != 9:
@@ -156,6 +190,7 @@ class FrankaQuestTeleop(Node):
         return matrix
 
     def start_servo_if_needed(self):
+        """Retry the MoveIt Servo start service until it succeeds."""
         if self.servo_started:
             self.servo_start_timer.cancel()
             return
@@ -186,6 +221,7 @@ class FrankaQuestTeleop(Node):
         self.servo_start_future = self.servo_start_client.call_async(Trigger.Request())
 
     def open_gripper_on_start(self):
+        """Open or home the gripper once the corresponding action server is ready."""
         if self.gripper_start_opened:
             if self.gripper_start_open_timer is not None:
                 self.gripper_start_open_timer.cancel()
@@ -217,6 +253,7 @@ class FrankaQuestTeleop(Node):
             self.gripper_start_open_timer.cancel()
 
     def home_gripper_on_start(self):
+        """Drive the startup Franka gripper homing state machine."""
         if self.gripper_homing_result_future is not None:
             if not self.gripper_homing_result_future.done():
                 return False
@@ -263,9 +300,11 @@ class FrankaQuestTeleop(Node):
         return False
 
     def controller_delta_to_robot_delta(self, controller_delta):
+        """Rotate a Quest position delta into the robot command frame."""
         return self.controller_to_robot_rotation @ controller_delta
 
     def controller_rotation_to_robot_rotation(self, controller_rotation):
+        """Rotate a Quest orientation delta into the robot command frame."""
         controller_rot_vec = controller_rotation.as_rotvec()
         robot_rot_vec = self.controller_to_robot_rotation @ controller_rot_vec
         return R.from_rotvec(robot_rot_vec)
@@ -298,6 +337,7 @@ class FrankaQuestTeleop(Node):
             return False
 
     def button_cb(self, msg):
+        """Update deadman and gripper-toggle state from a Joy message."""
         # Adjust indices according to oculus_reader outputs
         # Usually: index 1 is Grip, index 2 is Trigger
         if len(msg.buttons) < 3:
@@ -317,6 +357,7 @@ class FrankaQuestTeleop(Node):
         self.prev_trigger_pressed = self.trigger_pressed
 
     def trigger_value_from_joy(self, msg):
+        """Read the configured trigger axis, falling back to button index 2."""
         try:
             axis_index = int(self.gripper_trigger_axis_index)
         except (TypeError, ValueError):
@@ -331,6 +372,7 @@ class FrankaQuestTeleop(Node):
         return 1.0 if len(msg.buttons) > 2 and bool(msg.buttons[2]) else 0.0
 
     def toggle_gripper(self):
+        """Toggle between configured open and closed gripper widths."""
         self.gripper_is_open = not self.gripper_is_open
         target_width = (
             self.gripper_open_width if self.gripper_is_open else self.gripper_closed_width
@@ -340,6 +382,7 @@ class FrankaQuestTeleop(Node):
         self.command_gripper(target_width)
 
     def clamp_gripper_width(self, width):
+        """Clamp a requested gripper opening to the configured command range."""
         max_width = float(self.gripper_max_command_width)
         closed_width = float(self.gripper_closed_width)
         min_width = min(closed_width, max_width)
@@ -353,6 +396,7 @@ class FrankaQuestTeleop(Node):
         return clamped_width
 
     def command_gripper(self, width):
+        """Send a gripper action goal for the requested total fingertip gap."""
         if not self.gripper_client.server_is_ready():
             self.get_logger().warn(
                 f"Gripper action {self.gripper_action_name} is not ready.",
@@ -366,6 +410,7 @@ class FrankaQuestTeleop(Node):
         self.gripper_client.send_goal_async(goal)
 
     def pose_cb(self, msg):
+        """Convert the latest Quest pose into a Servo Twist command."""
         twist_msg = TwistStamped()
         twist_msg.header.stamp = self.get_clock().now().to_msg()
         twist_msg.header.frame_id = self.base_frame
@@ -434,6 +479,7 @@ class FrankaQuestTeleop(Node):
             self.publish_zero_twist(twist_msg)
 
     def publish_zero_twist(self, twist_msg):
+        """Publish an explicit zero velocity command."""
         twist_msg.twist.linear.x = 0.0
         twist_msg.twist.linear.y = 0.0
         twist_msg.twist.linear.z = 0.0

@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""ROS 2 bridge from the vendored Oculus reader to pose and Joy topics.
+
+The bridge polls the Quest over ADB and publishes controller poses on
+``/oculus/*_controller_pose`` plus normalized Joy messages on
+``/oculus/*_controller_buttons``. The teleop node consumes button index 1 as
+the grip deadman and trigger axis index 3 for the gripper toggle.
+"""
+
 import os
 import sys
 
@@ -10,6 +18,7 @@ import numpy as np
 
 
 def add_vendored_oculus_reader_to_path():
+    """Add the vendored ``oculus_reader`` package to ``sys.path`` if present."""
     workspace_src_path = os.path.join(
         '/home',
         'amal',
@@ -27,6 +36,8 @@ from oculus_reader.reader import OculusReader
 
 
 class OculusBridge(Node):
+    """Publish Quest controller transforms and button state as ROS 2 messages."""
+
     def __init__(self):
         super().__init__('oculus_bridge_node')
         
@@ -48,6 +59,7 @@ class OculusBridge(Node):
         self.timer = self.create_timer(0.02, self.publish_data)
 
     def publish_data(self):
+        """Poll the headset once and publish any available controller data."""
         transformations, buttons = self.oculus.get_transformations_and_buttons()
         if transformations is None:
             transformations = {}
@@ -67,6 +79,7 @@ class OculusBridge(Node):
             self.publish_buttons(buttons, 'r', self.right_btn_pub)
 
     def publish_pose(self, matrix, publisher, frame_id):
+        """Publish one 4x4 controller transform as a ``PoseStamped`` message."""
         # Extract translation
         pos = matrix[:3, 3]
         
@@ -82,6 +95,7 @@ class OculusBridge(Node):
         publisher.publish(msg)
 
     def has_side_button_data(self, buttons_dict, side):
+        """Return whether a raw button dictionary contains data for one hand."""
         if side == 'l':
             side_keys = ('X', 'Y', 'LThU', 'LJ', 'LG', 'LTr', 'leftJS', 'leftGrip', 'leftTrig')
         else:
@@ -89,6 +103,7 @@ class OculusBridge(Node):
         return any(key in buttons_dict for key in side_keys)
 
     def button_value(self, buttons_dict, digital_key, analog_key=None, threshold=0.5):
+        """Normalize a digital or analog raw button value to 0 or 1."""
         if bool(buttons_dict.get(digital_key, False)):
             return 1
         if analog_key is None:
@@ -103,6 +118,7 @@ class OculusBridge(Node):
             return 0
 
     def analog_value(self, buttons_dict, analog_key, digital_key=None):
+        """Normalize a raw analog value to the inclusive range 0.0 to 1.0."""
         value = buttons_dict.get(analog_key, 0.0)
         if isinstance(value, (list, tuple)):
             value = value[0] if value else 0.0
@@ -115,6 +131,7 @@ class OculusBridge(Node):
         return min(max(analog, 0.0), 1.0)
 
     def axis_value(self, buttons_dict, key, index, default=0.0):
+        """Read a joystick axis from a raw tuple-like value."""
         value = buttons_dict.get(key, ())
         if not isinstance(value, (list, tuple)) or len(value) <= index:
             return default
@@ -124,6 +141,7 @@ class OculusBridge(Node):
             return default
 
     def publish_buttons(self, buttons_dict, side, publisher):
+        """Publish normalized button and axis state for one controller side."""
         msg = Joy()
         msg.header.stamp = self.get_clock().now().to_msg()
 
