@@ -14,6 +14,32 @@ The package provides:
 Grip is the deadman switch. While grip is held, controller motion is mapped to
 Cartesian end-effector motion. Trigger toggles the gripper.
 
+## Oculus Reader Dependency
+
+The Quest bridge depends on
+[rail-berkeley/oculus_reader](https://github.com/rail-berkeley/oculus_reader).
+Clone and install it inside this repository directory so the package layout is:
+
+```text
+franka_ros2_ws/src/fr3duo_quest_teleop/
+├── fr3duo_quest_teleop/
+├── launch/
+├── config/
+└── oculus_reader/
+```
+
+From the parent folder of this README:
+
+```bash
+git clone https://github.com/rail-berkeley/oculus_reader.git oculus_reader
+python3 -m pip install -r oculus_reader/requirements.txt
+python3 -m pip install -e oculus_reader
+```
+
+The `oculus_bridge_node` imports `oculus_reader` from this local folder at
+runtime. If `oculus_reader` is cloned somewhere else, the Quest bridge will not
+start unless the import path is updated.
+
 ## Build
 
 From the workspace root:
